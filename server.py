@@ -226,22 +226,15 @@ class PromptServer():
 
         @routes.get("/embeddings")
         def get_embeddings(self):
-            embeddings = folder_paths.get_filename_list("embeddings")
-            return web.json_response(list(map(lambda a: os.path.splitext(a)[0], embeddings)))
+            return web.Response(status=404)
 
         @routes.get("/models")
         def list_model_types(request):
-            model_types = list(folder_paths.folder_names_and_paths.keys())
-
-            return web.json_response(model_types)
+            return web.Response(status=404)
 
         @routes.get("/models/{folder}")
         async def get_models(request):
-            folder = request.match_info.get("folder", None)
-            if not folder in folder_paths.folder_names_and_paths:
-                return web.Response(status=404)
-            files = folder_paths.get_filename_list(folder)
-            return web.json_response(files)
+            return web.Response(status=404)
 
         @routes.get("/extensions")
         async def get_extensions(request):
@@ -335,222 +328,28 @@ class PromptServer():
 
         @routes.post("/upload/image")
         async def upload_image(request):
-            post = await request.post()
-            return image_upload(post)
+            return web.Response(status=404)
 
 
         @routes.post("/upload/mask")
         async def upload_mask(request):
-            post = await request.post()
-
-            def image_save_function(image, post, filepath):
-                original_ref = json.loads(post.get("original_ref"))
-                filename, output_dir = folder_paths.annotated_filepath(original_ref['filename'])
-
-                if not filename:
-                    return web.Response(status=400)
-
-                # validation for security: prevent accessing arbitrary path
-                if filename[0] == '/' or '..' in filename:
-                    return web.Response(status=400)
-
-                if output_dir is None:
-                    type = original_ref.get("type", "output")
-                    output_dir = folder_paths.get_directory_by_type(type)
-
-                if output_dir is None:
-                    return web.Response(status=400)
-
-                if original_ref.get("subfolder", "") != "":
-                    full_output_dir = os.path.join(output_dir, original_ref["subfolder"])
-                    if os.path.commonpath((os.path.abspath(full_output_dir), output_dir)) != output_dir:
-                        return web.Response(status=403)
-                    output_dir = full_output_dir
-
-                file = os.path.join(output_dir, filename)
-
-                if os.path.isfile(file):
-                    with Image.open(file) as original_pil:
-                        metadata = PngInfo()
-                        if hasattr(original_pil,'text'):
-                            for key in original_pil.text:
-                                metadata.add_text(key, original_pil.text[key])
-                        original_pil = original_pil.convert('RGBA')
-                        mask_pil = Image.open(image.file).convert('RGBA')
-
-                        # alpha copy
-                        new_alpha = mask_pil.getchannel('A')
-                        original_pil.putalpha(new_alpha)
-                        original_pil.save(filepath, compress_level=4, pnginfo=metadata)
-
-            return image_upload(post, image_save_function)
+            return web.Response(status=404)
 
         @routes.get("/view")
         async def view_image(request):
-            if "filename" in request.rel_url.query:
-                filename = request.rel_url.query["filename"]
-                filename,output_dir = folder_paths.annotated_filepath(filename)
-
-                if not filename:
-                    return web.Response(status=400)
-
-                # validation for security: prevent accessing arbitrary path
-                if filename[0] == '/' or '..' in filename:
-                    return web.Response(status=400)
-
-                if output_dir is None:
-                    type = request.rel_url.query.get("type", "output")
-                    output_dir = folder_paths.get_directory_by_type(type)
-
-                if output_dir is None:
-                    return web.Response(status=400)
-
-                if "subfolder" in request.rel_url.query:
-                    full_output_dir = os.path.join(output_dir, request.rel_url.query["subfolder"])
-                    if os.path.commonpath((os.path.abspath(full_output_dir), output_dir)) != output_dir:
-                        return web.Response(status=403)
-                    output_dir = full_output_dir
-
-                filename = os.path.basename(filename)
-                file = os.path.join(output_dir, filename)
-
-                if os.path.isfile(file):
-                    if 'preview' in request.rel_url.query:
-                        with Image.open(file) as img:
-                            preview_info = request.rel_url.query['preview'].split(';')
-                            image_format = preview_info[0]
-                            if image_format not in ['webp', 'jpeg'] or 'a' in request.rel_url.query.get('channel', ''):
-                                image_format = 'webp'
-
-                            quality = 90
-                            if preview_info[-1].isdigit():
-                                quality = int(preview_info[-1])
-
-                            buffer = BytesIO()
-                            if image_format in ['jpeg'] or request.rel_url.query.get('channel', '') == 'rgb':
-                                img = img.convert("RGB")
-                            img.save(buffer, format=image_format, quality=quality)
-                            buffer.seek(0)
-
-                            return web.Response(body=buffer.read(), content_type=f'image/{image_format}',
-                                                headers={"Content-Disposition": f"filename=\"{filename}\""})
-
-                    if 'channel' not in request.rel_url.query:
-                        channel = 'rgba'
-                    else:
-                        channel = request.rel_url.query["channel"]
-
-                    if channel == 'rgb':
-                        with Image.open(file) as img:
-                            if img.mode == "RGBA":
-                                r, g, b, a = img.split()
-                                new_img = Image.merge('RGB', (r, g, b))
-                            else:
-                                new_img = img.convert("RGB")
-
-                            buffer = BytesIO()
-                            new_img.save(buffer, format='PNG')
-                            buffer.seek(0)
-
-                            return web.Response(body=buffer.read(), content_type='image/png',
-                                                headers={"Content-Disposition": f"filename=\"{filename}\""})
-
-                    elif channel == 'a':
-                        with Image.open(file) as img:
-                            if img.mode == "RGBA":
-                                _, _, _, a = img.split()
-                            else:
-                                a = Image.new('L', img.size, 255)
-
-                            # alpha img
-                            alpha_img = Image.new('RGBA', img.size)
-                            alpha_img.putalpha(a)
-                            alpha_buffer = BytesIO()
-                            alpha_img.save(alpha_buffer, format='PNG')
-                            alpha_buffer.seek(0)
-
-                            return web.Response(body=alpha_buffer.read(), content_type='image/png',
-                                                headers={"Content-Disposition": f"filename=\"{filename}\""})
-                    else:
-                        # Get content type from mimetype, defaulting to 'application/octet-stream'
-                        content_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
-
-                        # For security, force certain extensions to download instead of display
-                        file_extension = os.path.splitext(filename)[1].lower()
-                        if file_extension in {'.html', '.htm', '.js', '.css'}:
-                            content_type = 'application/octet-stream'  # Forces download
-
-                        return web.FileResponse(
-                            file,
-                            headers={
-                                "Content-Disposition": f"filename=\"{filename}\"",
-                                "Content-Type": content_type
-                            }
-                        )
-
             return web.Response(status=404)
 
         @routes.get("/view_metadata/{folder_name}")
         async def view_metadata(request):
-            folder_name = request.match_info.get("folder_name", None)
-            if folder_name is None:
-                return web.Response(status=404)
-            if not "filename" in request.rel_url.query:
-                return web.Response(status=404)
-
-            filename = request.rel_url.query["filename"]
-            if not filename.endswith(".safetensors"):
-                return web.Response(status=404)
-
-            safetensors_path = folder_paths.get_full_path(folder_name, filename)
-            if safetensors_path is None:
-                return web.Response(status=404)
-            out = comfy.utils.safetensors_header(safetensors_path, max_size=1024*1024)
-            if out is None:
-                return web.Response(status=404)
-            dt = json.loads(out)
-            if not "__metadata__" in dt:
-                return web.Response(status=404)
-            return web.json_response(dt["__metadata__"])
+            return web.Response(status=404)
 
         @routes.get("/system_stats")
         async def system_stats(request):
-            device = comfy.model_management.get_torch_device()
-            device_name = comfy.model_management.get_torch_device_name(device)
-            cpu_device = comfy.model_management.torch.device("cpu")
-            ram_total = comfy.model_management.get_total_memory(cpu_device)
-            ram_free = comfy.model_management.get_free_memory(cpu_device)
-            vram_total, torch_vram_total = comfy.model_management.get_total_memory(device, torch_total_too=True)
-            vram_free, torch_vram_free = comfy.model_management.get_free_memory(device, torch_free_too=True)
-
-            system_stats = {
-                "system": {
-                    "os": os.name,
-                    "ram_total": ram_total,
-                    "ram_free": ram_free,
-                    "comfyui_version": __version__,
-                    "python_version": sys.version,
-                    "pytorch_version": comfy.model_management.torch_version,
-                    "embedded_python": os.path.split(os.path.split(sys.executable)[0])[1] == "python_embeded",
-                    "argv": sys.argv
-                },
-                "devices": [
-                    {
-                        "name": device_name,
-                        "type": device.type,
-                        "index": device.index,
-                        "vram_total": vram_total,
-                        "vram_free": vram_free,
-                        "torch_vram_total": torch_vram_total,
-                        "torch_vram_free": torch_vram_free,
-                    }
-                ]
-            }
-            return web.json_response(system_stats)
+            return web.Response(status=404)
 
         @routes.get("/prompt")
         async def get_prompt(request):
-            return web.json_response(self.get_queue_info())
+            return web.Response(status=404)
 
         def node_info(node_class):
             obj_class = nodes.NODE_CLASS_MAPPINGS[node_class]
@@ -604,74 +403,23 @@ class PromptServer():
 
         @routes.get("/history")
         async def get_history(request):
-            max_items = request.rel_url.query.get("max_items", None)
-            if max_items is not None:
-                max_items = int(max_items)
-            return web.json_response(self.prompt_queue.get_history(max_items=max_items))
+            return web.Response(status=404)
 
         @routes.get("/history/{prompt_id}")
         async def get_history_prompt_id(request):
-            prompt_id = request.match_info.get("prompt_id", None)
-            return web.json_response(self.prompt_queue.get_history(prompt_id=prompt_id))
-
+            return web.Response(status=404)
+        
         @routes.get("/queue")
         async def get_queue(request):
-            queue_info = {}
-            current_queue = self.prompt_queue.get_current_queue()
-            queue_info['queue_running'] = current_queue[0]
-            queue_info['queue_pending'] = current_queue[1]
-            return web.json_response(queue_info)
+            return web.Response(status=404)
 
         @routes.post("/prompt")
         async def post_prompt(request):
-            logging.info("got prompt")
-            json_data =  await request.json()
-            json_data = self.trigger_on_prompt(json_data)
-
-            if "number" in json_data:
-                number = float(json_data['number'])
-            else:
-                number = self.number
-                if "front" in json_data:
-                    if json_data['front']:
-                        number = -number
-
-                self.number += 1
-
-            if "prompt" in json_data:
-                prompt = json_data["prompt"]
-                valid = execution.validate_prompt(prompt)
-                extra_data = {}
-                if "extra_data" in json_data:
-                    extra_data = json_data["extra_data"]
-
-                if "client_id" in json_data:
-                    extra_data["client_id"] = json_data["client_id"]
-                if valid[0]:
-                    prompt_id = str(uuid.uuid4())
-                    outputs_to_execute = valid[2]
-                    self.prompt_queue.put((number, prompt_id, prompt, extra_data, outputs_to_execute))
-                    response = {"prompt_id": prompt_id, "number": number, "node_errors": valid[3]}
-                    return web.json_response(response)
-                else:
-                    logging.warning("invalid prompt: {}".format(valid[1]))
-                    return web.json_response({"error": valid[1], "node_errors": valid[3]}, status=400)
-            else:
-                return web.json_response({"error": "no prompt", "node_errors": []}, status=400)
+            return web.Response(status=404)
 
         @routes.post("/queue")
         async def post_queue(request):
-            json_data =  await request.json()
-            if "clear" in json_data:
-                if json_data["clear"]:
-                    self.prompt_queue.wipe_queue()
-            if "delete" in json_data:
-                to_delete = json_data['delete']
-                for id_to_delete in to_delete:
-                    delete_func = lambda a: a[1] == id_to_delete
-                    self.prompt_queue.delete_queue_item(delete_func)
-
-            return web.Response(status=200)
+            return web.Response(status=404)
 
         @routes.post("/interrupt")
         async def post_interrupt(request):
@@ -680,27 +428,11 @@ class PromptServer():
 
         @routes.post("/free")
         async def post_free(request):
-            json_data = await request.json()
-            unload_models = json_data.get("unload_models", False)
-            free_memory = json_data.get("free_memory", False)
-            if unload_models:
-                self.prompt_queue.set_flag("unload_models", unload_models)
-            if free_memory:
-                self.prompt_queue.set_flag("free_memory", free_memory)
-            return web.Response(status=200)
+            return web.Response(status=404)
 
         @routes.post("/history")
         async def post_history(request):
-            json_data =  await request.json()
-            if "clear" in json_data:
-                if json_data["clear"]:
-                    self.prompt_queue.wipe_history()
-            if "delete" in json_data:
-                to_delete = json_data['delete']
-                for id_to_delete in to_delete:
-                    self.prompt_queue.delete_history_item(id_to_delete)
-
-            return web.Response(status=200)
+            return web.Response(status=404)
 
     async def setup(self):
         timeout = aiohttp.ClientTimeout(total=None) # no timeout
